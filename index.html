@@ -7,16 +7,18 @@
 <style>
   :root {
     --light: #f7f5f1;
-    --dark: #141143;
+    --dark: #141413;
+    --backdrop: color-mix(in srgb, var(--light) 90%, #000);
   }
+  :root[data-bg="dark"] { --backdrop: color-mix(in srgb, var(--dark) 90%, #fff); }
 
   html, body { margin: 0; padding: 0; height: 100vh; overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; color: white;
-    background: color-mix(in srgb, var(--light) 90%, #000); }
+    background: var(--backdrop); }
 
-  /* Page backdrop — the "light" swatch with a 10% dark overlay. */
-  #bg-color-source { position: fixed; inset: 0; z-index: -2;
-    background: color-mix(in srgb, var(--light) 90%, #000); }
+  /* Page backdrop — the chosen background swatch with a 10% contrast overlay
+     (darker for light, lighter for dark) so the canvas frame stays visible. */
+  #bg-color-source { position: fixed; inset: 0; z-index: -2; background: var(--backdrop); }
 
   /* Stage holds the centered canvas-frame. Sits to the left of the sidebar. */
   #stage {
@@ -107,7 +109,6 @@
 
   .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
   .row label { flex: 0 0 70px; opacity: 0.7; }
-  .row input[type="range"] { flex: 1; min-width: 0; accent-color: #1a1a1a; }
   .row .val {
     flex: 0 0 56px; text-align: right; font-variant-numeric: tabular-nums; opacity: 0.85;
     background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.15);
@@ -122,6 +123,10 @@
     width: 100%; background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.15);
     color: #1a1a1a; padding: 5px 8px; border-radius: 4px; font: inherit;
   }
+  /* Two labelled number fields side by side (x/y, width/height). */
+  .row .pair { flex: 1; display: flex; gap: 8px; min-width: 0; }
+  .row .pair .field { flex: 1; display: flex; align-items: center; gap: 4px; min-width: 0; }
+  .row .pair .field span { opacity: 0.5; font-size: 10px; text-transform: uppercase; }
   .row input[type="color"] { width: 40px; height: 24px; padding: 0; border: 1px solid rgba(0,0,0,0.25);
     border-radius: 4px; background: none; cursor: pointer; }
 
@@ -152,24 +157,16 @@
   #node-detail .section-title { margin-top: 12px; }
   #node-detail .section-title:first-child { margin-top: 0; }
 
-  /* Compact handle row: two number inputs side by side. */
-  .handle-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; font-size: 12px; }
-  .handle-row label { flex: 0 0 50px; opacity: 0.7; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; }
-  .handle-row .pair { flex: 1; display: flex; gap: 4px; }
-  .handle-row .pair input {
-    flex: 1; background: rgba(0,0,0,0.06); border: 1px solid rgba(0,0,0,0.15);
-    color: #1a1a1a; padding: 3px 6px; border-radius: 4px; font: inherit; font-size: 11px;
-    -moz-appearance: textfield; min-width: 0;
-  }
-  .handle-row .pair input::-webkit-outer-spin-button, .handle-row .pair input::-webkit-inner-spin-button {
-    -webkit-appearance: none; margin: 0;
-  }
+  /* Bezier handle rows share the .row/.pair layout so their fields line up
+     with the position rows. The label is a div, not a <label>, because a
+     <label> would forward clicks to the reset button inside it. */
+  .handle-row .dir-label { flex: 0 0 70px; display: flex; align-items: center; gap: 2px; opacity: 0.7; }
   .handle-row .reset {
-    background: none; border: none; color: #1a1a1a; opacity: 0.4; cursor: pointer; font-size: 12px; padding: 0 4px;
+    background: none; border: none; color: #1a1a1a; opacity: 0.5; cursor: pointer; font-size: 12px; padding: 0 4px;
   }
   .handle-row .reset:hover { opacity: 1; }
-  .handle-row.disabled label { opacity: 0.25; }
-  .handle-row.disabled .pair input { opacity: 0.25; pointer-events: none; }
+  .handle-row.disabled .dir-label { opacity: 0.25; }
+  .handle-row.disabled .pair { opacity: 0.25; pointer-events: none; }
   .handle-row.disabled .reset { display: none; }
 
   /* Export / Import modals */
@@ -221,10 +218,16 @@
     <div class="section">
       <div class="section-title">Background</div>
       <div class="row">
-        <label>Color</label>
+        <label>Preset</label>
+        <select id="preset-select">
+          <option value="">custom</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Mode</label>
         <select id="bg-color-select">
           <option value="#f7f5f1">light</option>
-          <option value="#141143">dark</option>
+          <option value="#141413">dark</option>
         </select>
       </div>
       <div class="toggle-row">
@@ -243,8 +246,10 @@
 
     <div class="section">
       <div class="section-title">Canvas size <span id="canvas-ar" style="opacity: 0.4; font-weight: 400; text-transform: none; letter-spacing: 0;"></span></div>
-      <div class="row"><label>Width</label><input type="number" id="canvas-w" min="64" max="4096" step="1"></div>
-      <div class="row"><label>Height</label><input type="number" id="canvas-h" min="64" max="4096" step="1"></div>
+      <div class="row"><label>Size</label><div class="pair">
+        <div class="field"><span>W</span><input type="number" id="canvas-w" min="64" max="4096" step="1"></div>
+        <div class="field"><span>H</span><input type="number" id="canvas-h" min="64" max="4096" step="1"></div>
+      </div></div>
     </div>
 
     <div class="section">
@@ -262,63 +267,65 @@
       <div class="row">
         <label>Color</label>
         <select id="n-color-select">
-          <option value="#f7f5f1">light</option>
+          <option id="n-color-bg" value="#f7f5f1">background</option>
           <option value="#bcefff">blue-1</option>
-          <option value="#A5D6EA">blue-2</option>
-          <option value="#8FBED5">blue-3</option>
-          <option value="#7AA6C0">blue-4</option>
-          <option value="#678EAC">blue-5</option>
+          <option value="#a5d6ea">blue-2</option>
+          <option value="#8fbed5">blue-3</option>
+          <option value="#7aa6c0">blue-4</option>
+          <option value="#678eac">blue-5</option>
           <option value="#557797">blue-6</option>
           <option value="#446182">blue-7</option>
-          <option value="#344C6E">blue-8</option>
+          <option value="#344c6e">blue-8</option>
           <option value="#263759">blue-9</option>
           <option value="#ffe3d9">coral</option>
         </select>
       </div>
-      <div class="row"><label>X</label><input type="range" id="n-x" min="-0.2" max="1.2" step="0.005"><input type="number" class="val" id="n-x-val" min="-2" max="2" step="0.001"></div>
-      <div class="row"><label>Y</label><input type="range" id="n-y" min="-0.2" max="1.2" step="0.005"><input type="number" class="val" id="n-y-val" min="-2" max="2" step="0.001"></div>
+      <div class="row"><label>Position</label><div class="pair">
+        <div class="field"><span>X</span><input type="number" id="n-x" step="0.01"></div>
+        <div class="field"><span>Y</span><input type="number" id="n-y" step="0.01"></div>
+      </div></div>
 
       <div class="section-title">Bezier handles (Δ from vertex)</div>
-      <div class="handle-row" data-dir="e">
-        <label>East</label>
+      <div class="row handle-row" data-dir="e">
+        <div class="dir-label">East<button class="reset" title="Reset to default">↺</button></div>
         <div class="pair">
-          <input type="number" data-axis="x" step="0.005" placeholder="dx">
-          <input type="number" data-axis="y" step="0.005" placeholder="dy">
+          <div class="field"><span>X</span><input type="number" data-axis="x" step="0.01"></div>
+          <div class="field"><span>Y</span><input type="number" data-axis="y" step="0.01"></div>
         </div>
-        <button class="reset" title="Reset to default">↺</button>
       </div>
-      <div class="handle-row" data-dir="w">
-        <label>West</label>
+      <div class="row handle-row" data-dir="w">
+        <div class="dir-label">West<button class="reset" title="Reset to default">↺</button></div>
         <div class="pair">
-          <input type="number" data-axis="x" step="0.005" placeholder="dx">
-          <input type="number" data-axis="y" step="0.005" placeholder="dy">
+          <div class="field"><span>X</span><input type="number" data-axis="x" step="0.01"></div>
+          <div class="field"><span>Y</span><input type="number" data-axis="y" step="0.01"></div>
         </div>
-        <button class="reset" title="Reset to default">↺</button>
       </div>
-      <div class="handle-row" data-dir="n">
-        <label>North</label>
+      <div class="row handle-row" data-dir="n">
+        <div class="dir-label">North<button class="reset" title="Reset to default">↺</button></div>
         <div class="pair">
-          <input type="number" data-axis="x" step="0.005" placeholder="dx">
-          <input type="number" data-axis="y" step="0.005" placeholder="dy">
+          <div class="field"><span>X</span><input type="number" data-axis="x" step="0.01"></div>
+          <div class="field"><span>Y</span><input type="number" data-axis="y" step="0.01"></div>
         </div>
-        <button class="reset" title="Reset to default">↺</button>
       </div>
-      <div class="handle-row" data-dir="s">
-        <label>South</label>
+      <div class="row handle-row" data-dir="s">
+        <div class="dir-label">South<button class="reset" title="Reset to default">↺</button></div>
         <div class="pair">
-          <input type="number" data-axis="x" step="0.005" placeholder="dx">
-          <input type="number" data-axis="y" step="0.005" placeholder="dy">
+          <div class="field"><span>X</span><input type="number" data-axis="x" step="0.01"></div>
+          <div class="field"><span>Y</span><input type="number" data-axis="y" step="0.01"></div>
         </div>
-        <button class="reset" title="Reset to default">↺</button>
       </div>
 
       <div class="section-title">Intro from</div>
-      <div class="row"><label>X</label><input type="range" id="n-ix" min="-0.5" max="1.5" step="0.01"><input type="number" class="val" id="n-ix-val" min="-2" max="2" step="0.01"></div>
-      <div class="row"><label>Y</label><input type="range" id="n-iy" min="-0.5" max="1.5" step="0.01"><input type="number" class="val" id="n-iy-val" min="-2" max="2" step="0.01"></div>
+      <div class="row"><label>Position</label><div class="pair">
+        <div class="field"><span>X</span><input type="number" id="n-ix" step="0.01"></div>
+        <div class="field"><span>Y</span><input type="number" id="n-iy" step="0.01"></div>
+      </div></div>
 
       <div class="section-title">Outro to</div>
-      <div class="row"><label>X</label><input type="range" id="n-ox" min="-0.5" max="1.5" step="0.01"><input type="number" class="val" id="n-ox-val" min="-2" max="2" step="0.01"></div>
-      <div class="row"><label>Y</label><input type="range" id="n-oy" min="-0.5" max="1.5" step="0.01"><input type="number" class="val" id="n-oy-val" min="-2" max="2" step="0.01"></div>
+      <div class="row"><label>Position</label><div class="pair">
+        <div class="field"><span>X</span><input type="number" id="n-ox" step="0.01"></div>
+        <div class="field"><span>Y</span><input type="number" id="n-oy" step="0.01"></div>
+      </div></div>
     </div>
 
     <!-- Visual 4x4 picker -->
@@ -413,8 +420,9 @@
     } else {
       gradient.playIntro();
     }
-    // Page bg stays static and dark (so the canvas frame is visible). The
-    // gradient bgColor only affects the inside of the canvas now.
+    // The shader only shows bgColor while fading in/out, so the page backdrop
+    // carries it the rest of the time.
+    document.documentElement.dataset.bg = config.bgColor.toLowerCase() === '#f7f5f1' ? 'light' : 'dark';
   }
 
   // ---------- DOM refs ----------
@@ -636,6 +644,7 @@
 
   // Called after any mutation that affects rendering.
   function afterMutate() {
+    $('preset-select').value = '';
     positionHandles();
     renderWireframe();
     renderGridPicker();
@@ -683,13 +692,14 @@
   function syncDetailInputs() {
     if (selectedVertexIndex === null) return;
     const v = config.vertices[selectedVertexIndex];
+    $('n-color-bg').value = config.bgColor.toLowerCase();
     $('n-color-select').value = v.color.toLowerCase();
-    setRange('n-x',  v.position[0], n => n.toFixed(2));
-    setRange('n-y',  v.position[1], n => n.toFixed(2));
-    setRange('n-ix', (v.introFrom || v.position)[0], n => n.toFixed(2));
-    setRange('n-iy', (v.introFrom || v.position)[1], n => n.toFixed(2));
-    setRange('n-ox', (v.outroTo   || v.position)[0], n => n.toFixed(2));
-    setRange('n-oy', (v.outroTo   || v.position)[1], n => n.toFixed(2));
+    $('n-x').value  = v.position[0].toFixed(2);
+    $('n-y').value  = v.position[1].toFixed(2);
+    $('n-ix').value = (v.introFrom || v.position)[0].toFixed(2);
+    $('n-iy').value = (v.introFrom || v.position)[1].toFixed(2);
+    $('n-ox').value = (v.outroTo   || v.position)[0].toFixed(2);
+    $('n-oy').value = (v.outroTo   || v.position)[1].toFixed(2);
     // Handle rows
     document.querySelectorAll('.handle-row').forEach(row => {
       const dir = row.dataset.dir;
@@ -706,10 +716,20 @@
     });
   }
 
-  function setRange(id, val, fmt) {
-    $(id).value = val;
-    const valEl = $(id + '-val');
-    valEl.value = fmt ? fmt(val) : Number(val).toFixed(2);
+  // Number input at 2dp: typed values apply on change; ↑/↓ step by 0.01
+  // (Shift: 0.1). Steps are handled here rather than natively so they land on
+  // clean 2dp values and apply immediately.
+  const round2 = (n) => Math.round(n * 100) / 100;
+  function bindStepper(el, onValue) {
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+      e.preventDefault();
+      const cur = parseFloat(el.value);
+      const step = (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowUp' ? 1 : -1);
+      el.value = round2((Number.isFinite(cur) ? cur : 0) + step).toFixed(2);
+      onValue();
+    });
+    el.addEventListener('change', onValue);
   }
 
   // ---------- detail-panel bindings ----------
@@ -717,13 +737,14 @@
     $('n-color-select').addEventListener('change', (e) => {
       if (selectedVertexIndex === null) return;
       config.vertices[selectedVertexIndex].color = e.target.value;
+      renderHandles();
       afterMutate();
     });
 
     const bindXY = (id, target, idx, idxOnVertex = null) => {
-      const apply = (raw) => {
+      bindStepper($(id), () => {
         if (selectedVertexIndex === null) return;
-        const n = parseFloat(raw);
+        const n = round2(parseFloat($(id).value));
         if (!Number.isFinite(n)) return;
         const v = config.vertices[selectedVertexIndex];
         if (idxOnVertex) {
@@ -733,12 +754,8 @@
         } else {
           v[target][idx] = n;
         }
-        $(id).value = n;
-        $(id + '-val').value = n.toFixed(2);
         afterMutate();
-      };
-      $(id).addEventListener('input', (e) => apply(e.target.value));
-      $(id + '-val').addEventListener('change', (e) => apply(e.target.value));
+      });
     };
     bindXY('n-x',  'position', 0);
     bindXY('n-y',  'position', 1);
@@ -755,13 +772,13 @@
         if (selectedVertexIndex === null) return;
         const v = config.vertices[selectedVertexIndex];
         if (v.handles[dir] === null) return;
-        const x = parseFloat(xi.value), y = parseFloat(yi.value);
+        const x = round2(parseFloat(xi.value)), y = round2(parseFloat(yi.value));
         if (!Number.isFinite(x) || !Number.isFinite(y)) return;
         v.handles[dir] = [x, y];
         afterMutate();
       };
-      xi.addEventListener('change', applyHandle);
-      yi.addEventListener('change', applyHandle);
+      bindStepper(xi, applyHandle);
+      bindStepper(yi, applyHandle);
       row.querySelector('.reset').addEventListener('click', () => {
         if (selectedVertexIndex === null) return;
         const { i, j } = ij(selectedVertexIndex);
@@ -775,11 +792,17 @@
 
   // ---------- global bindings ----------
   function bindGlobalInputs() {
+    // Switching mode recolours every vertex that sits on the old background
+    // colour, so the "background" nodes follow the mode.
     const onBg = (e) => {
-      const v = e.target.value;
-      config.bgColor = v;
-      $('bg-color-select').value = v;
-      rebuildGradient();
+      const prev = config.bgColor.toLowerCase();
+      const next = e.target.value;
+      config.bgColor = next;
+      for (const v of config.vertices) {
+        if (v.color.toLowerCase() === prev) v.color = next;
+      }
+      renderHandles();
+      afterMutate();
     };
     $('bg-color-select').addEventListener('change', onBg);
 
@@ -916,6 +939,48 @@
     return parsed;
   }
 
+  // Merge an imported/preset config into the current one (anything missing
+  // keeps its current value).
+  function applyConfig(parsed) {
+    if (parsed.bgColor)        config.bgColor        = parsed.bgColor;
+    if (parsed.introDuration != null) config.introDuration = parsed.introDuration;
+    if (parsed.outroDuration != null) config.outroDuration = parsed.outroDuration;
+    if (parsed.rows          != null) config.rows          = parsed.rows;
+    if (parsed.cols          != null) config.cols          = parsed.cols;
+    if (Number.isFinite(parsed.width))  config.width  = clampCanvas(parsed.width);
+    if (Number.isFinite(parsed.height)) config.height = clampCanvas(parsed.height);
+    config.vertices = structuredClone(parsed.vertices);
+    selectedVertexIndex = null;
+    syncGlobalInputs();
+    applyCanvasSize();
+    renderHandles(); renderWireframe(); renderGridPicker(); syncDetailPanel();
+    rebuildGradient();
+  }
+
+  // ---------- presets ----------
+  // presets/index.json holds the gradients used on the FFG site.
+  async function bindPresets() {
+    const select = $('preset-select');
+    let presets = [];
+    try {
+      presets = await (await fetch('./presets/index.json')).json();
+    } catch (e) {
+      console.warn('Failed to load presets:', e);
+    }
+    for (const p of presets) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name;
+      opt.title = p.usedOn;
+      select.appendChild(opt);
+    }
+    select.addEventListener('change', () => {
+      const p = presets.find(p => p.id === select.value);
+      if (p) applyConfig(p);
+      select.value = p ? p.id : '';
+    });
+  }
+
   function bindImport() {
     $('import-btn').addEventListener('click', () => {
       $('import-text').value = '';
@@ -927,21 +992,8 @@
     $('import-apply-btn').addEventListener('click', () => {
       $('import-error').textContent = '';
       try {
-        const parsed = parseImportedConfig($('import-text').value);
-        // Merge parsed fields into config (keep current defaults for anything missing)
-        if (parsed.bgColor)        config.bgColor        = parsed.bgColor;
-        if (parsed.introDuration != null) config.introDuration = parsed.introDuration;
-        if (parsed.outroDuration != null) config.outroDuration = parsed.outroDuration;
-        if (parsed.rows          != null) config.rows          = parsed.rows;
-        if (parsed.cols          != null) config.cols          = parsed.cols;
-        if (Number.isFinite(parsed.width))  config.width  = clampCanvas(parsed.width);
-        if (Number.isFinite(parsed.height)) config.height = clampCanvas(parsed.height);
-        config.vertices = parsed.vertices;
-        selectedVertexIndex = null;
-        syncGlobalInputs();
-        applyCanvasSize();
-        renderHandles(); renderWireframe(); renderGridPicker(); syncDetailPanel();
-        rebuildGradient();
+        applyConfig(parseImportedConfig($('import-text').value));
+        $('preset-select').value = '';
         $('import-modal').classList.remove('open');
       } catch (e) {
         $('import-error').textContent = 'Error: ' + e.message;
@@ -950,7 +1002,8 @@
   }
 
   function syncGlobalInputs() {
-    $('bg-color-select').value = config.bgColor;
+    // Anything that isn't the light swatch (e.g. an older #141143 link) is dark.
+    $('bg-color-select').value = config.bgColor.toLowerCase() === '#f7f5f1' ? '#f7f5f1' : '#141413';
     $('canvas-w').value = config.width;
     $('canvas-h').value = config.height;
   }
@@ -1121,6 +1174,7 @@
   bindDetailInputs();
   bindExport();
   bindImport();
+  bindPresets();
   bindJpgExport();
   bindShare();
   applyCanvasSize();
